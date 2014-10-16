@@ -111,9 +111,16 @@ func (j *Document) Start(text string, now time.Time) {
 }
 
 func (j *Document) Finish(text string, now time.Time) {
-	defer func() {
-		j.Curr = Curr{}
-	}()
+	j.flush(text, now)
+	j.Curr = Curr{}
+}
+
+func (j *Document) Flush(text string, now time.Time) {
+	j.flush(text, now)
+	j.Curr.Time = now
+}
+
+func (j *Document) flush(text string, now time.Time) {
 	if j.Curr.Time.IsZero() {
 		return
 	}
@@ -200,6 +207,7 @@ func main() {
 	}
 	d := flag.String("data", filepath.Join(u.HomeDir, ".ts.json"), "data file")
 	f := flag.Bool("f", false, "finish")
+	l := flag.Bool("l", false, "flush")
 	n := flag.Bool("n", false, "dry run")
 	flag.Parse()
 	var j Document
@@ -211,6 +219,8 @@ func main() {
 	if !*n {
 		if *f {
 			j.Finish(text, now)
+		} else if *l {
+			j.Flush(text, now)
 		} else {
 			j.Start(text, now)
 		}
