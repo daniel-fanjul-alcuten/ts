@@ -200,6 +200,7 @@ func main() {
 	}
 	d := flag.String("data", filepath.Join(u.HomeDir, ".ts.json"), "data file")
 	f := flag.Bool("f", false, "finish")
+	n := flag.Bool("n", false, "dry run")
 	flag.Parse()
 	var j Document
 	if err = j.ReadFrom(*d); err != nil {
@@ -207,14 +208,18 @@ func main() {
 	}
 	now := time.Now()
 	text := strings.Join(flag.Args(), " ")
-	if *f {
-		j.Finish(text, now)
-	} else {
-		j.Start(text, now)
+	if !*n {
+		if *f {
+			j.Finish(text, now)
+		} else {
+			j.Start(text, now)
+		}
 	}
 	j.Clean()
-	if err = j.WriteTo(*d); err != nil {
-		log.Fatal(err)
+	if !*n {
+		if err = j.WriteTo(*d); err != nil {
+			log.Fatal(err)
+		}
 	}
 	j.Println(now)
 }
