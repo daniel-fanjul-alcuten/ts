@@ -90,45 +90,10 @@ func (j *Document) ReadFrom(filename string) (err error) {
 	return
 }
 
-func (j *Document) Start(text string, now time.Time) {
-	if j.Curr.Time.IsZero() {
-		j.Curr = Curr{text, now}
-		return
-	}
-	if text == "" {
-		return
-	}
-	if j.Curr.Text == text {
-		return
-	}
-	if j.Curr.Text == "" {
-		j.Curr.Text = text
-		return
-	}
-	j.Finish(j.Curr.Text, now)
-	j.Curr = Curr{text, now}
-	return
-}
-
-func (j *Document) Finish(text string, now time.Time) {
-	j.flush(text, now)
-	j.Curr = Curr{}
-}
-
-func (j *Document) Flush(text string, now time.Time) {
-	j.flush(text, now)
-	j.Curr.Time = now
-}
-
-func (j *Document) flush(text string, now time.Time) {
-	if j.Curr.Time.IsZero() {
-		return
-	}
-	if text != "" {
-		j.Curr.Text = text
-	}
+func (j *Document) flush(now time.Time) {
 	d := now.Sub(j.Curr.Time)
 	if d <= 0 {
+		j.Curr.Time = now
 		return
 	}
 	p := Past{j.Curr.Text, d}
@@ -138,11 +103,38 @@ func (j *Document) flush(text string, now time.Time) {
 		if h.Date == t {
 			h.Past = append(h.Past, p)
 			j.Hist[i] = h
+			j.Curr.Time = now
 			return
 		}
 	}
 	j.Hist = append(j.Hist, Hist{t, []Past{p}})
+	j.Curr.Time = now
 	return
+}
+
+func (j *Document) Start(text string, now time.Time) {
+	if !j.Curr.Time.IsZero() {
+		j.flush(now)
+	}
+	if text != "" {
+		j.Curr = Curr{text, now}
+	}
+	return
+}
+
+func (j *Document) Finish(now time.Time) {
+	if j.Curr.Time.IsZero() {
+		return
+	}
+	j.flush(now)
+	j.Curr = Curr{}
+}
+
+func (j *Document) Discard(now time.Time) {
+	if j.Curr.Time.IsZero() {
+		return
+	}
+	j.Curr = Curr{}
 }
 
 func (j *Document) Clean() {
@@ -172,11 +164,16 @@ func (j *Document) Println(now time.Time) {
 		}
 		fmt.Printf("%v/%v/%v: %v\n", h.Date.Year, int(h.Date.Month), h.Date.Day, d)
 		for _, p := range h.Past {
-			fmt.Printf("  %v: %s\n", p.Duration, p.Text)
+			fmt.Printf("  %s: %v\n", p.Text, p.Duration)
 		}
 	}
 	if !j.Curr.Time.IsZero() {
-		fmt.Printf("%v: %s\n", now.Sub(j.Curr.Time), j.Curr.Text)
+		d := now.Sub(j.Curr.Time)
+		if d == 0 {
+			fmt.Printf("%s\n", j.Curr.Text)
+		} else {
+			fmt.Printf("%s for %v\n", j.Curr.Text, d)
+		}
 	}
 }
 
@@ -205,31 +202,28 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	d := flag.String("data", filepath.Join(u.HomeDir, ".ts.json"), "data file")
+	ts := flag.String("ts", filepath.Join(u.HomeDir, ".ts.json"), "file")
 	f := flag.Bool("f", false, "finish")
-	l := flag.Bool("l", false, "flush")
+	d := flag.Bool("d", false, "discard")
 	n := flag.Bool("n", false, "dry run")
 	flag.Parse()
 	var j Document
-	if err = j.ReadFrom(*d); err != nil {
+	if err = j.ReadFrom(*ts); err != nil {
 		log.Fatal(err)
 	}
 	now := time.Now()
 	text := strings.Join(flag.Args(), " ")
-	if !*n {
-		if *f {
-			j.Finish(text, now)
-		} else if *l {
-			j.Flush(text, now)
-		} else {
-			j.Start(text, now)
-		}
+	if *n {
+	} else if *f {
+		j.Finish(now)
+	} else if *d {
+		j.Discard(now)
+	} else {
+		j.Start(text, now)
 	}
 	j.Clean()
-	if !*n {
-		if err = j.WriteTo(*d); err != nil {
-			log.Fatal(err)
-		}
+	if err = j.WriteTo(*ts); err != nil {
+		log.Fatal(err)
 	}
 	j.Println(now)
 }
