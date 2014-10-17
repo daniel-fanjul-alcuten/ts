@@ -158,14 +158,13 @@ func (j *Document) Clean() {
 
 func (j *Document) Println(now time.Time) {
 	for _, h := range j.Hist {
+		fmt.Printf("%v/%v/%v\n", h.Date.Year, int(h.Date.Month), h.Date.Day)
 		var d time.Duration
 		for _, p := range h.Past {
+			fmt.Printf("  %s: %v\n", p.Text, p.Duration)
 			d += p.Duration
 		}
-		fmt.Printf("%v/%v/%v: %v\n", h.Date.Year, int(h.Date.Month), h.Date.Day, d)
-		for _, p := range h.Past {
-			fmt.Printf("  %s: %v\n", p.Text, p.Duration)
-		}
+		fmt.Printf("   %v\n", d)
 	}
 	if !j.Curr.Time.IsZero() {
 		d := now.Sub(j.Curr.Time)
