@@ -174,6 +174,34 @@ func (j *Document) Add(text string, d time.Duration, now time.Time) {
 	return
 }
 
+func (j *Document) Sub(sub time.Duration, now time.Time) {
+	for sub > 0 {
+		if len(j.Hist) == 0 {
+			break
+		}
+		h := j.Hist[0]
+		if len(h.Past) == 0 {
+			j.Hist = j.Hist[1:]
+			continue
+		}
+		p := h.Past[0]
+		if p.Duration < sub {
+			h.Past = h.Past[1:]
+			j.Hist[0] = h
+			// p.Duration -= p.Duration
+			sub -= p.Duration
+			continue
+		}
+		p.Duration -= sub
+		sub = 0 // sub -= sub
+		h.Past[0] = p
+		j.Hist[0] = h
+	}
+	if sub > 0 {
+		j.Add("sub", -sub, now)
+	}
+}
+
 func (j *Document) Println(now time.Time) {
 	for _, h := range j.Hist {
 		fmt.Printf("%v/%v/%v\n", h.Date.Year, int(h.Date.Month), h.Date.Day)
@@ -224,6 +252,7 @@ func main() {
 	d := flag.Bool("d", false, "discard")
 	n := flag.Bool("n", false, "dry run")
 	a := flag.Duration("a", 0, "add")
+	s := flag.Duration("s", 0, "subtract")
 	flag.Parse()
 	var j Document
 	if err = j.ReadFrom(*ts); err != nil {
@@ -238,6 +267,9 @@ func main() {
 		j.Discard(now)
 	} else if *a != 0 {
 		j.Add(text, *a, now)
+	} else if *s != 0 {
+		j.Clean()
+		j.Sub(*s, now)
 	} else {
 		j.Start(text, now)
 	}
