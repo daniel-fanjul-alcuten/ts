@@ -19,24 +19,11 @@ type Curr struct {
 	Text string
 	Time time.Time
 }
+
 type Date struct {
 	Year  int
 	Month time.Month
 	Day   int
-}
-type Past struct {
-	Text     string
-	Duration time.Duration
-}
-type Pasts []Past
-type Hist struct {
-	Date Date
-	Past Pasts
-}
-type Hists []Hist
-type Document struct {
-	Curr Curr
-	Hist Hists
 }
 
 func (d Date) Less(e Date) bool {
@@ -58,42 +45,73 @@ func (d Date) Less(e Date) bool {
 	return false
 }
 
-func (p Pasts) Len() int           { return len(p) }
-func (p Pasts) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
-func (p Pasts) Less(i, j int) bool { return p[i].Text < p[j].Text }
+type Past struct {
+	Text     string
+	Duration time.Duration
+}
 
-func (h Hists) Len() int           { return len(h) }
-func (h Hists) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h Hists) Less(i, j int) bool { return h[i].Date.Less(h[j].Date) }
+type Pasts []Past
 
-func (j *Document) ReadFrom(filename string) (err error) {
-	var f *os.File
-	if f, err = os.Open(filename); err != nil {
+func (p Pasts) Len() int {
+	return len(p)
+}
+
+func (p Pasts) Swap(i, j int) {
+	p[i], p[j] = p[j], p[i]
+}
+
+func (p Pasts) Less(i, j int) bool {
+	return p[i].Text < p[j].Text
+}
+
+type Hist struct {
+	Date Date
+	Past Pasts
+}
+
+type Hists []Hist
+
+func (h Hists) Len() int {
+	return len(h)
+}
+
+func (h Hists) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h Hists) Less(i, j int) bool {
+	return h[i].Date.Less(h[j].Date)
+}
+
+type Document struct {
+	Curr Curr
+	Hist Hists
+}
+
+func (j *Document) Load(filename string) error {
+	f, err := os.Open(filename)
+	if err != nil {
 		if os.IsNotExist(err) {
 			*j = Document{}
 			err = nil
 		}
-		return
+		return err
 	}
 	defer f.Close()
-	r := bufio.NewReader(f)
-	d := json.NewDecoder(r)
-	if err = d.Decode(j); err != nil {
-		if err != io.EOF {
-			return
-		}
+	d := json.NewDecoder(bufio.NewReader(f))
+	err = d.Decode(j)
+	if err == io.EOF {
 		err = nil
 	}
-	if err = f.Close(); err != nil {
-		return
-	}
-	return
+	return err
 }
 
-func (j *Document) flush(now time.Time) {
+func (j *Document) Flush(now time.Time) {
+	if j.Curr.Text == "" || j.Curr.Time.IsZero() {
+		return
+	}
 	d := now.Sub(j.Curr.Time)
 	if d <= 0 {
-		j.Curr.Time = now
 		return
 	}
 	p := Past{j.Curr.Text, d}
@@ -103,44 +121,14 @@ func (j *Document) flush(now time.Time) {
 		if h.Date == t {
 			h.Past = append(h.Past, p)
 			j.Hist[i] = h
-			j.Curr.Time = now
 			return
 		}
 	}
 	j.Hist = append(j.Hist, Hist{t, []Past{p}})
-	j.Curr.Time = now
 	return
-}
-
-func (j *Document) Start(text string, now time.Time) {
-	if !j.Curr.Time.IsZero() {
-		j.flush(now)
-	}
-	if text != "" {
-		j.Curr = Curr{text, now}
-	}
-	return
-}
-
-func (j *Document) Finish(now time.Time) {
-	if j.Curr.Time.IsZero() {
-		return
-	}
-	j.flush(now)
-	j.Curr = Curr{}
-}
-
-func (j *Document) Discard(now time.Time) {
-	if j.Curr.Time.IsZero() {
-		return
-	}
-	j.Curr = Curr{}
 }
 
 func (j *Document) Clean() {
-	if j.Curr.Time.IsZero() {
-		j.Curr = Curr{}
-	}
 	sort.Sort(j.Hist)
 	for i, h := range j.Hist {
 		m := make(map[string]time.Duration)
@@ -156,7 +144,7 @@ func (j *Document) Clean() {
 	}
 }
 
-func (j *Document) Add(text string, d time.Duration, now time.Time) {
+func (j *Document) Add(d time.Duration, text string, now time.Time) {
 	if text == "" {
 		return
 	}
@@ -174,34 +162,6 @@ func (j *Document) Add(text string, d time.Duration, now time.Time) {
 	return
 }
 
-func (j *Document) Sub(sub time.Duration, now time.Time) {
-	for sub > 0 {
-		if len(j.Hist) == 0 {
-			break
-		}
-		h := j.Hist[0]
-		if len(h.Past) == 0 {
-			j.Hist = j.Hist[1:]
-			continue
-		}
-		p := h.Past[0]
-		if p.Duration < sub {
-			h.Past = h.Past[1:]
-			j.Hist[0] = h
-			// p.Duration -= p.Duration
-			sub -= p.Duration
-			continue
-		}
-		p.Duration -= sub
-		sub = 0 // sub -= sub
-		h.Past[0] = p
-		j.Hist[0] = h
-	}
-	if sub > 0 {
-		j.Add("sub", -sub, now)
-	}
-}
-
 func (j *Document) Println(now time.Time) {
 	for _, h := range j.Hist {
 		fmt.Printf("%v/%v/%v\n", h.Date.Year, int(h.Date.Month), h.Date.Day)
@@ -210,9 +170,9 @@ func (j *Document) Println(now time.Time) {
 			fmt.Printf("  %s: %v\n", p.Text, p.Duration)
 			d += p.Duration
 		}
-		fmt.Printf("   %v\n", d)
+		fmt.Printf("    %v\n", d)
 	}
-	if !j.Curr.Time.IsZero() {
+	if j.Curr.Text != "" && !j.Curr.Time.IsZero() {
 		d := now.Sub(j.Curr.Time)
 		if d == 0 {
 			fmt.Printf("%s\n", j.Curr.Text)
@@ -222,60 +182,87 @@ func (j *Document) Println(now time.Time) {
 	}
 }
 
-func (j *Document) WriteTo(filename string) (err error) {
-	var f *os.File
-	if f, err = os.Create(filename); err != nil {
-		return
+func (j *Document) Save(filename string) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	e := json.NewEncoder(w)
-	if err = e.Encode(j); err != nil {
-		return
+	if err := e.Encode(j); err != nil {
+		return err
 	}
-	if err = w.Flush(); err != nil {
-		return
+	if err := w.Flush(); err != nil {
+		return err
 	}
-	if err = f.Close(); err != nil {
-		return
+	if err := f.Close(); err != nil {
+		return err
 	}
-	return
+	return nil
 }
 
-func main() {
+var (
+	Filename string
+	Finish   bool
+	Discard  bool
+	Noop     bool
+	Add      time.Duration
+	Sub      time.Duration
+)
+
+func init() {
 	u, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
 	}
-	ts := flag.String("ts", filepath.Join(u.HomeDir, ".ts.json"), "file")
-	f := flag.Bool("f", false, "finish")
-	d := flag.Bool("d", false, "discard")
-	n := flag.Bool("n", false, "dry run")
-	a := flag.Duration("a", 0, "add")
-	s := flag.Duration("s", 0, "subtract")
+	flag.StringVar(&Filename, "ts", filepath.Join(u.HomeDir, ".ts.json"), "file")
+	flag.BoolVar(&Noop, "n", false, "noop")
+	flag.BoolVar(&Finish, "f", false, "finish")
+	flag.BoolVar(&Discard, "d", false, "discard")
+	flag.DurationVar(&Add, "a", 0, "add")
+	flag.DurationVar(&Sub, "s", 0, "subtract")
+}
+
+func main() {
 	flag.Parse()
-	var j Document
-	if err = j.ReadFrom(*ts); err != nil {
+	if err := do(); err != nil {
 		log.Fatal(err)
 	}
-	now := time.Now()
-	text := strings.Join(flag.Args(), " ")
-	if *n {
-	} else if *f {
-		j.Finish(now)
-	} else if *d {
-		j.Discard(now)
-	} else if *a != 0 {
-		j.Add(text, *a, now)
-	} else if *s != 0 {
-		j.Clean()
-		j.Sub(*s, now)
+}
+
+func do() error {
+	var j Document
+	if err := j.Load(Filename); err != nil {
+		return err
+	}
+	now, text := time.Now(), strings.Join(flag.Args(), " ")
+	if Noop {
+	} else if Finish {
+		if text != "" {
+			j.Curr.Text = text
+		}
+		j.Flush(now)
+		j.Curr = Curr{}
+	} else if Discard {
+		j.Curr = Curr{}
+	} else if Add != 0 {
+		j.Add(Add, text, now)
+	} else if Sub != 0 {
+		j.Add(-Sub, text, now)
 	} else {
-		j.Start(text, now)
+		j.Flush(now)
+		if text != "" {
+			j.Curr.Text = text
+		}
+		if j.Curr.Text != "" {
+			j.Curr.Time = now
+		}
 	}
 	j.Clean()
-	if err = j.WriteTo(*ts); err != nil {
-		log.Fatal(err)
+	if err := j.Save(Filename); err != nil {
+		return err
 	}
 	j.Println(now)
+	return nil
 }
