@@ -15,84 +15,17 @@ import (
 	"time"
 )
 
-type Curr struct {
-	Text string
-	Time time.Time
-}
-
-type Date struct {
-	Year  int
-	Month time.Month
-	Day   int
-}
-
-func (d Date) Less(e Date) bool {
-	if d.Year < e.Year {
-		return true
-	} else if d.Year > e.Year {
-		return false
-	}
-	if d.Month < e.Month {
-		return true
-	} else if d.Month > e.Month {
-		return false
-	}
-	if d.Day < e.Day {
-		return true
-	} else if d.Day > e.Day {
-		return false
-	}
-	return false
-}
-
-type Past struct {
-	Text     string
-	Duration time.Duration
-}
-
-type Pasts []Past
-
-func (p Pasts) Len() int {
-	return len(p)
-}
-
-func (p Pasts) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
-}
-
-func (p Pasts) Less(i, j int) bool {
-	return p[i].Text < p[j].Text
-}
-
-type Hist struct {
-	Date Date
-	Past Pasts
-}
-
-type Hists []Hist
-
-func (h Hists) Len() int {
-	return len(h)
-}
-
-func (h Hists) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h Hists) Less(i, j int) bool {
-	return h[i].Date.Less(h[j].Date)
-}
-
 type Document struct {
-	Curr Curr
-	Hist Hists
+	Topic  string
+	Since  time.Time
+	Topics map[string]time.Duration
 }
 
 func (j *Document) Load(filename string) error {
 	f, err := os.Open(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			*j = Document{}
+			*j = Document{"", time.Time{}, map[string]time.Duration{}}
 			err = nil
 		}
 		return err
@@ -103,83 +36,10 @@ func (j *Document) Load(filename string) error {
 	if err == io.EOF {
 		err = nil
 	}
+	if j.Topics == nil {
+		j.Topics = map[string]time.Duration{}
+	}
 	return err
-}
-
-func (j *Document) Flush(now time.Time) {
-	if j.Curr.Text == "" || j.Curr.Time.IsZero() {
-		return
-	}
-	d := now.Sub(j.Curr.Time)
-	if d <= 0 {
-		return
-	}
-	p := Past{j.Curr.Text, d}
-	var t Date
-	t.Year, t.Month, t.Day = j.Curr.Time.Date()
-	for i, h := range j.Hist {
-		if h.Date == t {
-			h.Past = append(h.Past, p)
-			j.Hist[i] = h
-			return
-		}
-	}
-	j.Hist = append(j.Hist, Hist{t, []Past{p}})
-	return
-}
-
-func (j *Document) Clean() {
-	sort.Sort(j.Hist)
-	for i, h := range j.Hist {
-		m := make(map[string]time.Duration)
-		for _, p := range h.Past {
-			m[p.Text] += p.Duration
-		}
-		h.Past = h.Past[:0]
-		for t, d := range m {
-			h.Past = append(h.Past, Past{t, d})
-		}
-		sort.Sort(h.Past)
-		j.Hist[i] = h
-	}
-}
-
-func (j *Document) Add(d time.Duration, text string, now time.Time) {
-	if text == "" {
-		return
-	}
-	p := Past{text, d}
-	var t Date
-	t.Year, t.Month, t.Day = now.Date()
-	for i, h := range j.Hist {
-		if h.Date == t {
-			h.Past = append(h.Past, p)
-			j.Hist[i] = h
-			return
-		}
-	}
-	j.Hist = append(j.Hist, Hist{t, []Past{p}})
-	return
-}
-
-func (j *Document) Println(now time.Time) {
-	for _, h := range j.Hist {
-		fmt.Printf("%v/%v/%v\n", h.Date.Year, int(h.Date.Month), h.Date.Day)
-		var d time.Duration
-		for _, p := range h.Past {
-			fmt.Printf("  %s: %v\n", p.Text, p.Duration)
-			d += p.Duration
-		}
-		fmt.Printf("    %v\n", d)
-	}
-	if j.Curr.Text != "" && !j.Curr.Time.IsZero() {
-		d := now.Sub(j.Curr.Time)
-		if d == 0 {
-			fmt.Printf("%s\n", j.Curr.Text)
-		} else {
-			fmt.Printf("%s for %v\n", j.Curr.Text, d)
-		}
-	}
 }
 
 func (j *Document) Save(filename string) error {
@@ -196,17 +56,52 @@ func (j *Document) Save(filename string) error {
 	if err := w.Flush(); err != nil {
 		return err
 	}
-	if err := f.Close(); err != nil {
-		return err
-	}
 	return nil
+}
+
+func (j *Document) Flush(now time.Time) {
+	if j.Topic == "" || j.Since.IsZero() {
+		return
+	}
+	d := now.Sub(j.Since)
+	if d <= 0 {
+		return
+	}
+	j.Since = now
+	j.Topics[j.Topic] += d
+	return
+}
+
+func (j *Document) Println(now time.Time) {
+	if len(j.Topics) > 0 {
+		topics := make([]string, 0, len(j.Topics))
+		for t := range j.Topics {
+			topics = append(topics, t)
+		}
+		sort.Strings(topics)
+		total := time.Duration(0)
+		for _, t := range topics {
+			d := j.Topics[t]
+			fmt.Printf("%s: %v\n", t, d)
+			total += d
+		}
+		fmt.Printf("  %v\n", total)
+	}
+	if j.Topic != "" && !j.Since.IsZero() {
+		d := now.Sub(j.Since)
+		if d == 0 {
+			fmt.Printf("%s\n", j.Topic)
+		} else {
+			fmt.Printf("%s for %v\n", j.Topic, d)
+		}
+	}
 }
 
 var (
 	Filename string
+	Noop     bool
 	Finish   bool
 	Discard  bool
-	Noop     bool
 	Add      time.Duration
 	Sub      time.Duration
 )
@@ -216,12 +111,12 @@ func init() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	flag.StringVar(&Filename, "ts", filepath.Join(u.HomeDir, ".ts.json"), "file")
-	flag.BoolVar(&Noop, "n", false, "noop")
-	flag.BoolVar(&Finish, "f", false, "finish")
-	flag.BoolVar(&Discard, "d", false, "discard")
-	flag.DurationVar(&Add, "a", 0, "add")
-	flag.DurationVar(&Sub, "s", 0, "subtract")
+	flag.StringVar(&Filename, "ts", filepath.Join(u.HomeDir, ".ts.json"), "The file name")
+	flag.BoolVar(&Noop, "n", false, "Do Nothing")
+	flag.BoolVar(&Finish, "f", false, "Finish")
+	flag.BoolVar(&Discard, "d", false, "Discard")
+	flag.DurationVar(&Add, "a", 0, "Add")
+	flag.DurationVar(&Sub, "s", 0, "Subtract")
 }
 
 func main() {
@@ -236,33 +131,47 @@ func do() error {
 	if err := j.Load(Filename); err != nil {
 		return err
 	}
-	now, text := time.Now(), strings.Join(flag.Args(), " ")
+	now, topic := time.Now(), strings.Join(flag.Args(), " ")
 	if Noop {
 	} else if Finish {
-		if text != "" {
-			j.Curr.Text = text
+		if topic != "" {
+			j.Topic = topic
 		}
 		j.Flush(now)
-		j.Curr = Curr{}
+		j.Topic, j.Since = "", time.Time{}
 	} else if Discard {
-		j.Curr = Curr{}
+		j.Topic, j.Since = "", time.Time{}
 	} else if Add != 0 {
-		j.Add(Add, text, now)
+		if topic == "" {
+			topic = j.Topic
+		}
+		if topic != "" {
+			j.Topics[topic] += Add
+		}
 	} else if Sub != 0 {
-		j.Add(-Sub, text, now)
+		if topic == "" {
+			topic = j.Topic
+		}
+		if topic != "" {
+			j.Topics[topic] += -Sub
+			j.Topics["_"] += j.Topics[topic]
+			j.Topics[topic] -= j.Topics[topic]
+		}
 	} else {
 		j.Flush(now)
-		if text != "" {
-			j.Curr.Text = text
-		}
-		if j.Curr.Text != "" {
-			j.Curr.Time = now
+		if topic != "" {
+			j.Topic = topic
+			j.Since = now
 		}
 	}
-	j.Clean()
+	for t, d := range j.Topics {
+		if d == 0 {
+			delete(j.Topics, t)
+		}
+	}
+	j.Println(now)
 	if err := j.Save(Filename); err != nil {
 		return err
 	}
-	j.Println(now)
 	return nil
 }
