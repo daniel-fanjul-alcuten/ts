@@ -104,6 +104,7 @@ var (
 	Discard  bool
 	Add      time.Duration
 	Sub      time.Duration
+	Update   bool
 )
 
 func init() {
@@ -117,6 +118,7 @@ func init() {
 	flag.BoolVar(&Discard, "d", false, "Discard")
 	flag.DurationVar(&Add, "a", 0, "Add")
 	flag.DurationVar(&Sub, "s", 0, "Subtract")
+	flag.BoolVar(&Update, "u", false, "Update")
 }
 
 func main() {
@@ -156,6 +158,15 @@ func do() error {
 			j.Topics[topic] += -Sub
 			j.Topics["_"] += j.Topics[topic]
 			j.Topics[topic] -= j.Topics[topic]
+		}
+	} else if Update {
+		if j.Topic != "" && topic != "" {
+			j.Topic = topic
+		}
+		j.Flush(now)
+		if topic != "" {
+			j.Topic = topic
+			j.Since = now
 		}
 	} else {
 		j.Flush(now)
